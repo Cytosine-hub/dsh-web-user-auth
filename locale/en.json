@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Web User Authentication",
+    "description": "Sign users in through a local directory or an HTTP identity service, isolate their Sessions, and give each user a private workspace directory."
+  }
+}

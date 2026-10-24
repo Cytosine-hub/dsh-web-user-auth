@@ -1,0 +1,52 @@
+{
+  "name": "@local/dsh-web-user-auth",
+  "version": "0.7.2",
+  "private": true,
+  "type": "module",
+  "description": "Web user authentication with per-user Session isolation and per-user workspace confinement for DeepSeek Harness.",
+  "scripts": {
+    "test": "node --test"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./client": "./lib/client.js"
+  },
+  "files": [
+    "index.js",
+    "lib/*.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "scripts/*.mjs",
+    "scripts/*.py"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": "*"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Cytosine-hub/dsh-web-user-auth.git"
+  },
+  "homepage": "https://github.com/Cytosine-hub/dsh-web-user-auth#readme",
+  "bugs": {
+    "url": "https://github.com/Cytosine-hub/dsh-web-user-auth/issues"
+  }
+}

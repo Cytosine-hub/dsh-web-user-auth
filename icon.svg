@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Web user authentication">
+  <defs>
+    <linearGradient id="shield" x1="12" y1="8" x2="52" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2d7ff9"/>
+      <stop offset="1" stop-color="#124fb6"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="#0d1b2f"/>
+  <path d="M32 9 51 16v15.5c0 11.2-7.6 19.6-19 23.5-11.4-3.9-19-12.3-19-23.5V16L32 9Z" fill="url(#shield)"/>
+  <circle cx="32" cy="29" r="6.2" fill="none" stroke="#fff" stroke-width="3"/>
+  <path d="M32 35.2v8.3" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+  <path d="M21.5 18.5 32 14.6l10.5 3.9" fill="none" stroke="#bcd8ff" stroke-width="1.6" stroke-linecap="round" opacity=".8"/>
+</svg>

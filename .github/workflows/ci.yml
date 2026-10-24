@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Run tests
+        run: npm test
+      - name: Build distributable
+        run: npm pack --ignore-scripts
+      - name: Check distributable contents
+        run: |
+          python3 - <<'PY'
+          import pathlib, tarfile
+          archives = list(pathlib.Path('.').glob('*.tgz'))
+          assert len(archives) == 1
+          with tarfile.open(archives[0]) as archive:
+              names = archive.getnames()
+              assert 'package/LICENSE' in names
+              assert 'package/scripts/reset-admin-password.py' in names
+              assert not any('/.git/' in name or '/node_modules/' in name for name in names)
+              assert not any(name.endswith(('/credentials.json', '/auth-settings.json', '/initial-password.txt', '/secret')) for name in names)
+          PY

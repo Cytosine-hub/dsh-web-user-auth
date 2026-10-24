@@ -1,0 +1,21 @@
+# Installed switched off so a fresh installation cannot lock a remote Web UI.
+# Enable it from the Web Plugins page (or set `disabled: false`) after reviewing
+# the configuration below. Every value is documented in README.md.
+- insert:
+    - id: web-user-auth
+      name: '@local/dsh-web-user-auth'
+      disabled: true
+      config:
+        enabled: true
+        provider: local
+        # Empty values use $DSH_HOME/web-users, $DSH_HOME/web-user-auth,
+        # and $DSH_WEB_URL (or the request's origin).
+        workspaceRoot: ''
+        stateDir: ''
+        publicUrl: ''
+        cookieMaxAgeDays: 7
+        allowOwnerLoopback: true
+        setup:
+          enabled: true
+        local:
+          users: []
