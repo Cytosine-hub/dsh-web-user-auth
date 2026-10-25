@@ -17,3 +17,5 @@ This plugin provides application-level authentication and per-user session/works
 Use this repository's **Security → Report a vulnerability** flow for private reports. Include affected versions, a minimal reproduction using test accounts, and the expected security boundary. Do not publish production tokens, passwords, signing keys or personal session contents in issues or pull requests.
 
 If private reporting is temporarily unavailable, open an issue requesting a private reporting channel without including exploit details or secrets.
+
+Token administrator mapping is opt-in. Only the server-validated user-info response may supply roles; administrator roles are configured locally. Matched external administrators can manage instance authentication and plugins, while session/workspace ownership remains tied to the external user ID. Role changes revoke existing Token sessions on revalidation.

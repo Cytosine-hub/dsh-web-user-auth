@@ -70,7 +70,7 @@ function browser({storage='localStorage',value='fixture-token',field='',siteOrig
   for(const area of ['localStorage','sessionStorage'])window[area]={getItem(key){reads.push([area,key]);return area===storage?stored:null}}
   const sandbox={window,URL,Date,Object,JSON,document:{createElement:tag=>{const result=node(tag);nodes.push(result);return result},body:node('body')},setInterval:fn=>{intervals.push(fn);return intervals.length},clearInterval(){},fetch:async(url,options)=>{requests.push({url,options});const denied=fail||options?.method==='POST'&&!JSON.parse(options.body).token;return {ok:!denied,status:denied?401:200,json:async()=>denied?{error:'Token 已过期'}:url.endsWith('/status')?{role:'user',provider:'token'}:{id:'alice',changed:false}}}}
   vm.runInNewContext(tokenBrowserScript,sandbox)
-  return {window,nodes,events,intervals,navigations,requests,reads,config:{siteOrigin,storage,storageKey:'auth-key',storageField:field},setStored:value=>stored=value}
+  return {window,nodes,events,intervals,navigations,requests,reads,config:{siteOrigin,storage,storageKey:'auth-key',storageField:field,role:'user'},setStored:value=>stored=value}
 }
 const flush=()=>new Promise(resolve=>setImmediate(resolve))
 
@@ -95,8 +95,8 @@ test('browser bridge surfaces expired token errors and watches storage removal w
 
 test('token mode integrates same-origin exchange, signed opaque sessions, expiry and preserved admin access',async()=>{
   const {apply}=await import('../lib/plugin.js')
-  let expiresAt=Date.now()+100000,expired=false,headersSeen,bodyIdentity='alice'
-  const server=createServer((req,res)=>{headersSeen=req.headers.authorization;res.setHeader('content-type','application/json');if(expired){res.writeHead(401);res.end('{}');return}res.end(JSON.stringify({code:0,expired:false,expiresAt,data:{uid:bodyIdentity,display:'Alice'}}))})
+  let expiresAt=Date.now()+100000,expired=false,headersSeen,bodyIdentity='alice',bodyRoles=['member']
+  const server=createServer((req,res)=>{headersSeen=req.headers.authorization;res.setHeader('content-type','application/json');if(expired){res.writeHead(401);res.end('{}');return}res.end(JSON.stringify({code:0,expired:false,expiresAt,data:{uid:bodyIdentity,display:'Alice',roles:bodyRoles}}))})
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
   const site='http://127.0.0.1:'+server.address().port,host=new URL(site).host
   const home=fs.mkdtempSync(path.join(os.tmpdir(),'dsh-token-mode-')),previous=process.env.DSH_HOME;process.env.DSH_HOME=home
@@ -107,7 +107,7 @@ test('token mode integrates same-origin exchange, signed opaque sessions, expiry
   const post=async(route,body,cookie,requestOrigin=site,requestHost=host)=>{const req=Object.assign((async function*(){yield Buffer.from(typeof body==='string'?body:JSON.stringify(body))})(),{method:'POST',headers:{host:requestHost,origin:requestOrigin,cookie,'content-type':'application/json','sec-fetch-site':'same-origin'}});const result=res();await routes.get(route)(req,result);return result}
   const get=async(route,cookie,url=route)=>{const result=res();await routes.get(route)({method:'GET',url,headers:{host,cookie}},result);return result}
   try{
-    await apply(ctx,{enabled:true,provider:'token',token:{siteOrigin:site,userInfoUrl:'/me',storage:'sessionStorage',storageKey:'auth',storageField:'access.token',userField:'data',idField:'uid',nameField:'display',successField:'code',successValue:0,expiredField:'expired',expiresAtField:'expiresAt',expiresAtFormat:'milliseconds'}})
+    await apply(ctx,{enabled:true,provider:'token',token:{siteOrigin:site,userInfoUrl:'/me',storage:'sessionStorage',storageKey:'auth',storageField:'access.token',roleField:'roles',adminRoles:['admin'],userField:'data',idField:'uid',nameField:'display',successField:'code',successValue:0,expiredField:'expired',expiresAtField:'expiresAt',expiresAtFormat:'milliseconds'}})
     assert.match((await get('/login')).body,/auth-token-client.js/)
     assert.match((await get('/login')).body,/sessionStorage/)
     assert.equal((await post('/api/auth/token',{token:'fixture-user-token'},undefined,'https://foreign.example.test')).status,403)
@@ -124,6 +124,21 @@ test('token mode integrates same-origin exchange, signed opaque sessions, expiry
     const adminCookie=administrator.headers['set-cookie'][0].split(';')[0]
     assert.equal(JSON.parse((await get('/api/auth/status',adminCookie)).body).role,'admin')
     assert.equal(JSON.parse((await post('/api/auth/token',{token:'fixture-user-token'},adminCookie)).body).administrator,true)
+    bodyRoles=['admin']
+    const promoted=await post('/api/auth/token',{token:'fixture-admin-token'},cookie)
+    const externalAdminCookie=promoted.headers['set-cookie'][0].split(';')[0]
+    const externalState=JSON.parse((await get('/api/auth/status',externalAdminCookie)).body)
+    assert.equal(externalState.role,'admin');assert.equal(externalState.userId,'alice');assert.equal(externalState.provider,'token');assert.equal(externalState.canChangePassword,false);assert.equal(externalState.tokenClient.role,'admin')
+    assert.equal((await get('/api/auth/admin',externalAdminCookie)).status,200)
+    assert.equal((await get('/api/auth/admin-password',externalAdminCookie)).status,403)
+    const externalPeer=ctx.connection.admit({headers:{host,cookie:externalAdminCookie}}).peer
+    assert.equal(externalPeer.principal.kind,'harness-admin');assert.equal(externalPeer.principal.userId,'alice')
+    bodyRoles=['member']
+    const demoted=await post('/api/auth/token',{token:'fixture-member-token'},externalAdminCookie)
+    const memberCookie=demoted.headers['set-cookie'][0].split(';')[0]
+    assert.equal(externalPeer.signal.aborted,true)
+    assert.equal((await get('/api/auth/admin',memberCookie)).status,403)
+    assert.equal(ctx.connection.admit({headers:{host,cookie:memberCookie}}).peer.principal.kind,'harness-user')
     bodyIdentity='__dsh_administrator__';assert.equal((await post('/api/auth/token',{token:'another-fixture'})).status,401);bodyIdentity='alice'
     expired=true
     assert.equal((await post('/api/auth/token',{token:'expired-fixture'},cookie)).status,401)
@@ -158,4 +173,38 @@ test('invalid inactive token settings do not block recovery into local mode',asy
   const value=normalizeConfig({provider:'local',token:{siteOrigin:'invalid',userInfoUrl:'https://outside.example.test'}})
   assert.equal(value.provider,'local')
   assert.throws(()=>normalizeConfig({provider:'token',token:{siteOrigin:'invalid',userInfoUrl:'https://outside.example.test'}}))
+})
+
+
+test('token administrator roles use explicit exact matching and fail closed for missing or malformed roles',()=>{
+  const rules=config({roleField:'access.roles',adminRoles:['admin','superadmin']})
+  for(const roles of ['admin',['member','superadmin']])assert.equal(tokenIdentity({user:{id:'alice',access:{roles}}},rules).identity.administrator,true)
+  for(const roles of [undefined,null,1,{},['admin',{}],'ADMIN','administrator','admin,member',[]])assert.equal(tokenIdentity({user:{id:'alice',access:{roles}}},rules).identity.administrator,undefined)
+  assert.equal(tokenIdentity({user:{id:'alice',role:'admin'}},config()).identity.administrator,undefined)
+  for(const patch of [{adminRoles:['admin']},{roleField:'role',adminRoles:'admin'},{roleField:'role',adminRoles:['']}])assert.throws(()=>config(patch),/角色/)
+  const form=new URLSearchParams({provider:'token','token.siteOrigin':origin,'token.userInfoUrl':'/api/me','token.roleField':'roles','token.adminRoles':'["admin"]'})
+  assert.deepEqual(mergeSavedSettings({},persistedSettings(parseSettings(form,{},origin))).token.adminRoles,['admin'])
+})
+
+test('periodic role demotion revokes administrator sessions and credentials',async()=>{
+  let roles=['admin'];const timers=[],revoked=[]
+  const sessions=new TokenSessions(config({roleField:'roles',adminRoles:['admin']}),{setTimer:callback=>{timers.push(callback);return timers.length},clearTimer(){},onRevoke:id=>revoked.push(id),fetchImpl:async()=>new Response(JSON.stringify({user:{id:'alice',roles}}))})
+  const {record}=await sessions.exchange('fixture-administrator')
+  assert.equal(sessions.administrator('alice').administrator,true)
+  roles=['member'];await timers.shift()()
+  assert.equal(sessions.administrator('alice'),undefined);assert.equal(sessions.get(record.sid),undefined);assert.equal(record.token,'');assert.deepEqual(revoked,['alice']);sessions.dispose()
+})
+
+test('token administrators receive management grants while sessions and workspaces stay isolated',async()=>{
+  const {createUserAccessPolicy}=await import('../lib/policy.js')
+  let administrator=true
+  const {policy,rememberSession}=createUserAccessPolicy({ctx:{typert:{local:{list:()=>[{namespace:'pluginManager',method:'setPluginEnabled'}]}},workspaceRegistry:{list:()=>[{id:'alice-workspace',path:'/srv/users/alice'},{id:'bob-workspace',path:'/srv/users/bob'}]},remoteAccess:{invalidate(){}}},workspaceRoot:'/srv/users',workspaceOf:id=>'/srv/users/'+id,userForPath:target=>target.split('/')[3],isAdministrator:id=>administrator&&id==='alice'})
+  rememberSession('alice-chat','/srv/users/alice');rememberSession('bob-chat','/srv/users/bob')
+  const bindings=policy.bindings({kind:'harness-admin',userId:'alice'})
+  assert.ok(bindings[0].role.actions.includes('pluginManager/setPluginEnabled'))
+  assert.ok(bindings.some(binding=>binding.resource.id==='alice-chat'))
+  assert.ok(bindings.some(binding=>binding.resource.id==='alice-workspace'))
+  assert.equal(bindings.some(binding=>binding.resource.id==='bob-chat'||binding.resource.id==='bob-workspace'),false)
+  assert.deepEqual(policy.bindings({kind:'harness-admin',userId:'bob'}),[])
+  administrator=false;assert.deepEqual(policy.bindings({kind:'harness-admin',userId:'alice'}),[])
 })

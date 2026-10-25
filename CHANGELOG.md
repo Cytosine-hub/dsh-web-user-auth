@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.0
+
+- Map Token user-info roles to configured administrator roles with explicit, case-sensitive matching.
+- Keep Token administrators on their own identity, sessions and workspaces, with independent local administrator recovery.
+- Revoke sessions on administrator role changes; preserve Token expiry and cookie clearing.
+
 ## 0.8.0
 
 - Add same-origin Token authentication from localStorage or sessionStorage, including JSON storage field extraction.
