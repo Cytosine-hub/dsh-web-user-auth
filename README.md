@@ -3,7 +3,7 @@
 [![CI](https://github.com/Cytosine-hub/dsh-web-user-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/Cytosine-hub/dsh-web-user-auth/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-为 DeepSeek Harness Web UI 提供 Local、HTTP、Header 三种普通用户认证方式、本地管理员入口、用户工作区隔离和原生管理面板。
+为 DeepSeek Harness Web UI 提供 Local、HTTP、Header、Token 四种普通用户认证方式、本地管理员入口、用户工作区隔离和原生管理面板。
 
 这是独立插件包，不需要修改 Harness 源码。已验证的宿主版本为 `@deepseek-ai/dsh-web-app 0.2.1-rc.2`；其他版本需要先验证连接、Remote Access 和 UI 插槽接口兼容性。
 
@@ -28,7 +28,7 @@
 
    ```sh
    # 替换为实际安装包的绝对路径；web 替换为目标实例的 profile。
-   dsh plugin --profile web add /absolute/path/to/local-dsh-web-user-auth-0.7.2.tgz
+   dsh plugin --profile web add /absolute/path/to/local-dsh-web-user-auth-0.8.0.tgz
    ```
 
    如果 `dsh` 不在 PATH 中，请使用本机安装位置的可执行文件路径。
@@ -55,13 +55,14 @@
 
 本地管理员始终使用 `admin` 和本地密码登录，不受普通用户认证模式切换影响。`admin` 是保留用户名。HTTP 返回的角色或 Header 身份不会自动成为插件管理员，目前不提供外部管理员映射。
 
-管理员和 Local/HTTP 普通用户共用 `<BASE_URL>login`。Harness 原有 DeepSeek 平台账号登录仍用于模型服务等功能，与本机 Web UI 访问身份独立。
+管理员和 Local/HTTP 普通用户共用 `<BASE_URL>login`。Token 普通用户在同一页面通过浏览器存储自动认证，本地管理员可使用 `<BASE_URL>login?admin=1` 暂停自动 Token 登录。Harness 原有 DeepSeek 平台账号登录仍用于模型服务等功能，与本机 Web UI 访问身份独立。
 
 | 模式 | 普通用户身份来源 | 配置与操作 |
 |---|---|---|
 | Local | 插件本地用户目录 | 管理员创建、重置账号；可自助修改密码的用户显示改密和退出按钮 |
 | HTTP | 已有账号密码登录 API | 插件 POST JSON/Form 的 `username`、`password`，可用返回 token 请求用户资料；通常不需要修改反向代理 |
 | Header | 可信代理注入的身份请求头 | 代理先认证，再覆盖身份头和共享密钥头；普通用户不显示本地改密、退出按钮 |
+| Token | 同源浏览器存储中的 Token | 从 localStorage/sessionStorage 读取 Token，服务端验证同源用户信息接口；由业务系统管理登录、退出和密码 |
 
 在“用户与认证”中选择认证方式并保存，立即生效，重启后保留。管理员的本地登录入口保留，普通用户需要按新方式重新登录。
 
@@ -76,6 +77,41 @@
 配置用户 ID 头、显示名称头、共享密钥头和至少十六位共享密钥。代理必须覆盖外部传入的这些头，并限制上游只接受可信代理连接。保存表单不会自动修改代理。
 
 如果外层代理也拦截管理员请求，需在代理层保留管理员的可用访问路径；插件本地登录无法越过外层代理。用户的登录、会话有效期和退出由外部认证系统负责。本地管理员依然使用本地认证，提供修改密码和退出登录。
+
+### 同源 Token
+
+适用于已有业务系统将访问 Token 存入浏览器存储的场景。业务系统、Harness 和用户信息接口必须具有**完全相同的协议、域名和端口**；不同路径可以，例如业务系统在 `/`、Harness 在 `/assistant/`。不支持跨域部署，不会通过放宽 CORS 绕过限制。
+
+在管理面板选择“同源存储 Token”，配置：
+
+- 同源站点地址：仅协议、域名、端口，必须与当前配置页面相同。
+- 存储位置：`localStorage` 或 `sessionStorage`，以及存储键名。可选点路径用于从 JSON 存储值取出 Token；留空直接使用字符串。
+- 用户信息接口：同源完整 URL 或相对于站点根的路径，例如 `/api/user/me`。接口须支持服务端使用指定请求头 GET 验证 Token；不转发浏览器的业务 Cookie，不跟随重定向。响应上限 64 KiB。
+- Token 请求头和前缀：默认 `authorization`、`Bearer `，前缀后的空格需要保留。禁止 Host、Cookie、Origin 等请求控制头。
+- 用户映射：用户对象路径，以及相对于该对象的 ID、显示名称路径。用户对象留空表示整个响应。用户 ID 必须有效且不能是内部管理员身份。
+- 响应规则：允许的 2xx HTTP 状态码，可选成功字段/期望值、过期标志字段/过期值、过期时间字段及秒/毫秒/ISO 格式。响应规则的路径均相对于响应根节点；比较值使用 JSON 基本类型，严格区分 `0` 与 `"0"`。
+- 检查间隔和超时：默认 30 秒复查、10 秒超时，可在面板调整。
+
+例如接口返回：
+
+```json
+{
+  "code": 0,
+  "expired": false,
+  "expiresAt": 4102444800,
+  "data": { "uid": "example-user", "displayName": "示例用户" }
+}
+```
+
+可配置用户对象 `data`、ID `uid`、名称 `displayName`，成功字段 `code` 等于 `0`，过期字段 `expired` 等于 `true` 时拒绝，过期时间字段 `expiresAt` 采用 Unix 秒。配置了某个检查字段后，响应缺少该字段也会被拒绝。所有检查均需通过，401/403 或其他未允许状态、非 JSON、重定向、接口故障、过期及无效身份均不授予访问。
+
+浏览器只提交 Token，身份由服务端接口响应决定。原始 Token 仅保留在原浏览器存储和服务端内存，不写入配置、日志或 Harness Cookie；Cookie 中只包含签名身份及随机会话 ID。没有外部管理员角色映射。
+
+**Cookie 与 Token 同步失效：** 接口提供过期时间时，Harness Cookie 的签名过期时间和 Max-Age 都不会超过它；登录后继续按检查间隔复查，复查失败即撤销服务端会话并断开连接。浏览器轮询登录状态时会收到清除 Cookie 的响应，并回到登录页。如果仅通过接口的布尔值/业务码判断失效，识别延迟受检查间隔和请求超时限制。浏览器离线时服务端无法主动删除浏览器文件中的 Cookie，但已撤销会话不能再用于访问，恢复请求时会清除 Cookie。
+
+浏览器在后台监听 Token 替换或移除；普通用户没有本地改密和退出按钮，应由业务系统更新/清除其 Token。`localStorage` 可在同源标签页共享；`sessionStorage` 仅属于当前标签页，新开标签页不会自动继承。隐私设置阻止存储读取时，页面显示错误并保留本地管理员登录入口。
+
+Token 会话不持久化；重启或切换配置后，需要从浏览器存储重新验证。无活动的内存会话会清理。浏览器同源脚本本来就能读取这些存储，因此同源部署中的各应用必须互信。
 
 ## 日常管理
 

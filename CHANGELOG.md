@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.0
+
+- Add same-origin Token authentication from localStorage or sessionStorage, including JSON storage field extraction.
+- Add user-info endpoint configuration, identity mapping, strict status/JSON/expiration rules, and periodic server validation.
+- Bound Harness cookies to reported token expiration; revoke sessions and clear cookies when token validation fails.
+- Watch browser token replacement/removal, preserving independent local administrator login.
+
 ## 0.7.2
 
 First public release.
