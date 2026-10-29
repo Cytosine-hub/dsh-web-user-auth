@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add browser downloads to native delivery cards through their public slot; resolve only owned durable delivery coordinates and enforce user workspace boundaries, including administrator isolation and native byte limits.
+- Admit only authenticated GET requests to the native desktop metadata route, so headless Hosts report unavailable instead of a metadata read error; desktop actions remain restricted.
+
 - Resolve file RPC paths from the session workspace and validate byte-read base files and resolved targets, blocking cross-user symlink and base-file reads while retaining owned parent paths.
 - Restrict the native reminder catalog to owned sessions and bind optional-service guards to their reload lifecycle; deny catalog access before its guard is ready and reject expired administrator identities at service guards.
 

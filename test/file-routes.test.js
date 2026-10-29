@@ -45,11 +45,31 @@ async function fixture(t) {
     },
   }
   const captured = connection.createSharedFetchHandler('/api')
+  const services = {
+    sessionQuery: {
+      async readEvent({ sessionId, seq }) {
+        if (seq === 99) throw new Error('missing event')
+        return {
+          session: { id: sessionId, cwd: directories[sessionId.slice('session-'.length)] },
+          target: { type: seq === 2 ? 'other' : 'deliverables/presented', data: {
+            turn: 1, callId: 'fixture-present', files: [
+              { path: seq === 3 ? path.join(directories.bob, 'foreign.docx') : '报告.docx' },
+            ],
+          } },
+        }
+      },
+    },
+    workspaceFiles: {
+      async readBytes(scope, target) {
+        return { absolutePath: path.resolve(scope.workspaceRoot, target), data: Buffer.from('fixture-document'), bytes: 16, eof: true }
+      },
+    },
+  }
   const ctx = {
     logger: { info() {}, warn() {} },
     on() { return () => {} },
     effect(fn) { const dispose = fn(); if (typeof dispose === 'function') disposers.push(dispose) },
-    get() {},
+    get(name) { return services[name] },
     connection,
     webServer: { protocol: 'http:', register(row) { routes.set(row.path, row.handler); return () => {} } },
     remoteAccess: { registerPolicy() { return () => {} }, invalidate() {} },
@@ -102,7 +122,7 @@ async function fixture(t) {
     assert.equal(res.status, 303)
     return res.headers['set-cookie'][0].split(';')[0]
   }
-  return { connection, captured, directories, cookie, request, dispatch, adminCookie, dispose, uploaded: () => uploaded }
+  return { connection, captured, directories, cookie, request, dispatch, adminCookie, dispose, routes, services, uploaded: () => uploaded }
 }
 
 test('TC-AUTH-FILE-001 captured native handler accepts owned streaming uploads after Auth starts', async t => {
@@ -182,4 +202,66 @@ test('TC-AUTH-FILE-006 teardown restores native admission without mutating share
   assert.equal(f.connection.admit(request).rejection, 401)
   assert.equal(ordinary.signal.aborted, true)
   assert.equal(f.connection.browserPeer.principal.kind, 'owner')
+})
+
+
+test('TC-AUTH-FILE-007 only authenticated GET of desktop metadata gets native route admission', async t => {
+  const f = await fixture(t)
+  assert.equal((await f.dispatch(f.request('/api/present.host', 'GET'))).status, 200)
+  assert.equal((await f.dispatch(f.request('/api/present.host', 'GET', ''))).status, 401)
+  for (const [url, method] of [
+    ['/api/present.host', 'POST'], ['/api/present.host/extra', 'GET'],
+    ['/api/present.open?sessionId=session-alice', 'POST'],
+  ]) assert.equal((await f.dispatch(f.request(url, method))).status, 403)
+})
+
+async function download(f, query, auth = f.cookie(), method = 'GET') {
+  const res = {
+    headers: {}, body: undefined,
+    writeHead(status, headers) { this.status = status; Object.assign(this.headers, headers) },
+    end(body) { this.body = body },
+  }
+  const handler = f.routes.get('/api/auth/download')
+  assert.equal(typeof handler, 'function', 'download route is registered')
+  await handler(f.request('/api/auth/download?' + query, method, auth), res)
+  return res
+}
+
+test('TC-AUTH-FILE-008 owned declared documents download as attachments without a desktop', async t => {
+  const f = await fixture(t)
+  const res = await download(f, 'sessionId=session-alice&seq=1&index=0')
+  assert.equal(res.status, 200)
+  assert.equal(Buffer.from(res.body).toString(), 'fixture-document')
+  assert.match(res.headers['content-disposition'], /^attachment;/)
+  assert.ok(res.headers['content-disposition'].includes(encodeURIComponent('报告.docx')))
+  assert.equal(res.headers['cache-control'], 'no-store')
+  const ownAdmin = 'sessionId=session-' + ADMIN_USER_ID + '&seq=1&index=0'
+  assert.equal((await download(f, ownAdmin, await f.adminCookie())).status, 200)
+})
+
+test('TC-AUTH-FILE-009 downloads reject missing identity, foreign sessions, bad events and escaping paths', async t => {
+  const f = await fixture(t)
+  const own = 'sessionId=session-alice&seq=1&index=0'
+  for (const auth of ['', f.cookie(Date.now() - 1000), f.cookie() + 'tampered']) {
+    assert.equal((await download(f, own, auth)).status, 401)
+  }
+  assert.equal((await download(f, own, await f.adminCookie())).status, 403)
+  assert.equal((await download(f, own, f.cookie(), 'POST')).status, 405)
+  for (const [query, status] of [
+    ['sessionId=session-bob&seq=1&index=0', 403],
+    ['sessionId=session-alice&seq=-1&index=0', 400],
+    ['sessionId=session-alice&seq=1&index=0.5', 400],
+    ['sessionId=session-alice&seq=2&index=0', 404],
+    ['sessionId=session-alice&seq=1&index=1', 404],
+    ['sessionId=session-alice&seq=3&index=0', 403],
+  ]) assert.equal((await download(f, query)).status, status, query)
+  f.services.workspaceFiles.readBytes = async () => ({
+    absolutePath: path.join(f.directories.alice, '报告.docx'),
+    data: Buffer.from('partial'), bytes: 100, eof: false,
+  })
+  assert.equal((await download(f, own)).status, 413)
+  f.services.workspaceFiles.readBytes = async () => { throw Object.assign(new Error('fixture'), { code: 'workspace-file/too-large' }) }
+  assert.equal((await download(f, own)).status, 413)
+  delete f.services.workspaceFiles
+  assert.equal((await download(f, own)).status, 503)
 })

@@ -271,7 +271,7 @@ test('native client exposes management only to admin and logout to both roles', 
     const React={createElement:(type,props,...children)=>({type,props,children})}
     const sandbox={URL,URLSearchParams,fetch:async()=>({ok:true,status:200,json:async()=>({role,name:role==='admin'?'admin':'Alice'})}),setTimeout(){},window:{location:{href:'https://example.test/dsh-web/'},__ModuleLoader__:{load(module){plugin=module.factory(()=>React)}}}}
     vm.runInNewContext(code,sandbox)
-    const ctx={locale:{register(){return ()=>{}}},layout:{selectPanel(){}},effect(fn){fn()},slots:{inject(name,fn){fn()},register(options,component){if(options.name==='main'){const cell=options.name+'/'+options.key+'/'+(options.priority??0);if(occupied.has(cell))throw new Error('duplicate keyed slot at the same priority');occupied.add(cell)}registrations.push({options,component});return ()=>{}}}}
+    const ctx={locale:{register(){return ()=>{}},bind:()=>key=>key},layout:{selectPanel(){}},effect(fn){fn()},slots:{inject(name,fn){fn()},register(options,component){if(options.name==='main'){const cell=options.name+'/'+options.key+'/'+(options.priority??0);if(occupied.has(cell))throw new Error('duplicate keyed slot at the same priority');occupied.add(cell)}registrations.push({options,component});return ()=>{}}}}
     await plugin.apply(ctx)
     assert.equal(registrations.some(row=>row.options.name==='main'&&row.options.key==='web-user-auth'),role==='admin')
     assert.equal(registrations.some(row=>row.options.name==='main'&&row.options.key==='plugins'),false)
@@ -607,7 +607,7 @@ test('header accounts have no password or logout controls; local account has pas
     const React={createElement:(type,props,...children)=>({type,props,children})}
     const sandbox={URL,URLSearchParams,setTimeout(){},fetch:async()=>({ok:true,status:200,json:async()=>({role:'user',name:'Alice',provider,canChangePassword:provider==='local'})}),window:{location:{href:'https://test.local/dsh-web/'},__ModuleLoader__:{load(module){plugin=module.factory(()=>React)}}}}
     vm.runInNewContext(source,sandbox)
-    await plugin.apply({layout:{selectPanel(){}},effect(fn){fn()},locale:{register(){}},slots:{inject(name,fn){fn()},register(options,component){rows.push({options,component})}}})
+    await plugin.apply({layout:{selectPanel(){}},effect(fn){fn()},locale:{register(){},bind:()=>key=>key},slots:{inject(name,fn){fn()},register(options,component){rows.push({options,component})}}})
     const footer=rows.find(row=>row.options.name==='sidebar.footer.action')
     const tree=JSON.stringify(footer.component({...footer.options.inject(),wide:true}))
     assert.equal(tree.includes('退出登录'),provider!=='header');assert.equal(tree.includes('修改密码'),provider==='local')
