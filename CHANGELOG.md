@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Allow authenticated users to read the opaque Office preview generation used by the native preview cache. Keep document rendering restricted to owned sessions and workspace paths.
+
 ## 0.9.0
 
 - Map Token user-info roles to configured administrator roles with explicit, case-sensitive matching.
