@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-web-user-auth",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "private": true,
   "type": "module",
   "description": "Web user authentication with per-user Session isolation and per-user workspace confinement for DeepSeek Harness.",

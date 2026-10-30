@@ -244,3 +244,26 @@ node --test test/unit.test.js
 ## 许可证与贡献
 
 本项目采用 [MIT License](LICENSE)。开发与测试方式见 [CONTRIBUTING.md](CONTRIBUTING.md)，安全边界和私密漏洞报告方式见 [SECURITY.md](SECURITY.md)。
+
+
+## 原生审批或向用户提问没有面板
+
+DSH Gateway `0.2.1-rc.2` 的原版网关仅允许 owner 接收/回答转发交互。认证插件使用隔离的 `harness-user` / `harness-admin`，因此即使插件登录正常，也可能看不到工具审批或 `ask_user_question` 的面板。此前只修复 `approval/request` 的宿主仍会遗漏 `user-questions/request`。
+
+插件附带独立兼容工具，由实例维护者在安装/构建环境显式执行；仅升级插件不会自动改写宿主，插件启用时也不会修改宿主文件。不需要修改门户业务代码。本工具仅支持已核对的 Gateway `0.2.1-rc.2` 原版字节及审批专用旧补丁；其他版本或内容拒绝修改，需先审查上游。
+
+```sh
+# 在插件目录运行；将路径替换为目标 Harness 实际使用的 Gateway 包目录。
+node scripts/repair-gateway.mjs --check <GATEWAY_PACKAGE_DIR>
+node scripts/repair-gateway.mjs --apply <GATEWAY_PACKAGE_DIR>
+```
+
+`--check` 只读输出 `repair-required` 或 `compatible`；`--apply` 首次写入前备份入口文件，再原子替换。重复执行不重复修改。必须对目标实例实际加载的依赖目录执行，多个独立安装需分别处理。完成后由维护者重启对应 Harness 实例；容器部署应在镜像构建阶段执行，不要修改运行中的容器。升级宿主依赖后重新检查。回退前停止对应实例，仅在宿主版本未变化时恢复该入口旁的 `.web-user-auth-backup` 文件。
+
+修复仅允许审批和用户提问两类交互，投递与回答均依据服务端 Agent 的会话 ID 校验 `session/control`。管理员也不能接收或回答他人的请求；未知事件仍拒绝。取消、停止和刷新重连沿用原生网关。它不会自动批准请求或把用户提升为 owner。
+
+可针对修复后的真实 Gateway 运行交互回归测试（需该宿主依赖完整）：
+
+```sh
+DSH_GATEWAY_ENTRY=<GATEWAY_PACKAGE_DIR>/lib/index.js node --test test/gateway-runtime.test.js
+```

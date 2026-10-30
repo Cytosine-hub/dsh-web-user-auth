@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.9.1
+
+- Ship an explicit, version/hash-checked Gateway repair tool for native approvals and user questions, including older approval-only repairs. No automatic Host mutation on plugin startup.
+- Recheck session/control ownership both on interaction delivery and answers; keep administrator isolation, cancellation, stop and reconnect behavior.
+
 
 - Add browser downloads to native delivery cards through their public slot; resolve only owned durable delivery coordinates and enforce user workspace boundaries, including administrator isolation and native byte limits.
 - Admit only authenticated GET requests to the native desktop metadata route, so headless Hosts report unavailable instead of a metadata read error; desktop actions remain restricted.
