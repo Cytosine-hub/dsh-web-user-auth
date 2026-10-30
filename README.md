@@ -246,23 +246,17 @@ node --test test/unit.test.js
 本项目采用 [MIT License](LICENSE)。开发与测试方式见 [CONTRIBUTING.md](CONTRIBUTING.md)，安全边界和私密漏洞报告方式见 [SECURITY.md](SECURITY.md)。
 
 
-## 原生审批或向用户提问没有面板
+## 原生审批与向用户提问的会话隔离
 
-DSH Gateway `0.2.1-rc.2` 的原版网关仅允许 owner 接收/回答转发交互。认证插件使用隔离的 `harness-user` / `harness-admin`，因此即使插件登录正常，也可能看不到工具审批或 `ask_user_question` 的面板。此前只修复 `approval/request` 的宿主仍会遗漏 `user-questions/request`。
+从 0.9.2 起，插件自动为隔离用户接入原生网关交互。安装/升级插件并重载插件（或由实例维护者重启 Harness）即可生效，不需要运行宿主修复脚本，不改写宿主依赖文件，不要求修改门户或 DSH 镜像。启用后用户仍使用自己的身份，不会提升为实例 owner。
 
-插件附带独立兼容工具，由实例维护者在安装/构建环境显式执行；仅升级插件不会自动改写宿主，插件启用时也不会修改宿主文件。不需要修改门户业务代码。本工具仅支持已核对的 Gateway `0.2.1-rc.2` 原版字节及审批专用旧补丁；其他版本或内容拒绝修改，需先审查上游。
+`approval/request` 与 `user-questions/request` 均使用服务端 Agent 的 `session.id`，在投递和回答两个环节检查会话归属及原生 `session/control` 权限。A 的请求只有 A 能接收和回答，其他普通用户及插件管理员均不可见、不可回答；拒绝猜测事件 ID、跨连接回答和已撤销权限。未知交互默认不转发给插件用户。
 
-```sh
-# 在插件目录运行；将路径替换为目标 Harness 实际使用的 Gateway 包目录。
-node scripts/repair-gateway.mjs --check <GATEWAY_PACKAGE_DIR>
-node scripts/repair-gateway.mjs --apply <GATEWAY_PACKAGE_DIR>
-```
+事件队列、完成/取消、任务停止和刷新重连沿用原生网关；普通通知继续经过原生资源权限过滤。插件重载或停用时会清理其用户交互流并恢复被包装的方法。可选网关服务晚于插件启动或重新加载时，适配随服务生命周期重新注册。已在原版 `0.2.1-rc.2` 网关及旧审批专用兼容补丁上验证；不支持的接口形态拒绝安装适配，而不授予 owner 权限。
 
-`--check` 只读输出 `repair-required` 或 `compatible`；`--apply` 首次写入前备份入口文件，再原子替换。重复执行不重复修改。必须对目标实例实际加载的依赖目录执行，多个独立安装需分别处理。完成后由维护者重启对应 Harness 实例；容器部署应在镜像构建阶段执行，不要修改运行中的容器。升级宿主依赖后重新检查。回退前停止对应实例，仅在宿主版本未变化时恢复该入口旁的 `.web-user-auth-backup` 文件。
+0.9.1 中附带的宿主文件修复工具已移除，不再需要额外修改 Gateway 文件。
 
-修复仅允许审批和用户提问两类交互，投递与回答均依据服务端 Agent 的会话 ID 校验 `session/control`。管理员也不能接收或回答他人的请求；未知事件仍拒绝。取消、停止和刷新重连沿用原生网关。它不会自动批准请求或把用户提升为 owner。
-
-可针对修复后的真实 Gateway 运行交互回归测试（需该宿主依赖完整）：
+开发者可针对完整依赖的原版 Gateway 安装运行回归测试（测试不会修改该安装）：
 
 ```sh
 DSH_GATEWAY_ENTRY=<GATEWAY_PACKAGE_DIR>/lib/index.js node --test test/gateway-runtime.test.js

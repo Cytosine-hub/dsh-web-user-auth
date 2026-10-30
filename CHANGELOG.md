@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.2
+
+- Handle native approval and user-question interactions inside the plugin, without rewriting Host files or promoting users to owner.
+- Check server-side session ownership and session/control at delivery and answer time, including administrator isolation.
+- Preserve native notification filtering, cancellation, stop, reconnect, and service reload cleanup; support original and approval-only patched Gateways.
+- Remove the separate Host-file repair tool introduced in 0.9.1.
+
+
 ## 0.9.1
 
 - Ship an explicit, version/hash-checked Gateway repair tool for native approvals and user questions, including older approval-only repairs. No automatic Host mutation on plugin startup.

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import { test as nodeTest } from 'node:test'
+import {installInteractions} from '../lib/interactions.js'
+import {patchServiceMethod} from '../lib/service-patch.js'
 import { pathToFileURL } from 'node:url'
 
 // Run against the installed Gateway, before and after the build-time compatibility fix.
@@ -18,8 +20,10 @@ function fixture(kind = 'harness-user', userId = 'alice', event = 'approval/requ
   const peer = { principal: { kind, userId }, interactions: 'answer', signal: new AbortController().signal }
   const pending = { id: 'event-a', source: { event, context: { subject: { session: { id: 'session-a' } } } }, frame: { type: 'waterfall', event, eventId: 'event-a' }, deliveries: new Set() }
   gateway.pendingRemoteEvents.set(pending.id, pending)
+  const disposers=[]
+  const cleanup=installInteractions({ctx:gateway.ctx,userFromPrincipal:p=>({id:p.userId}),ownsSession:(id,sessionId)=>id==='alice'&&sessionId==='session-a'},gateway,(name,create)=>disposers.push(patchServiceMethod(gateway,name,create)))
   const stream = gateway.openRemoteEvents({ args: {} }, new AbortController().signal, peer)
-  return { gateway, peer, pending, stream, revoke: () => { allowed = false } }
+  return { gateway, peer, pending, stream, cleanup:()=>{cleanup();for(const dispose of disposers.reverse())dispose()}, revoke: () => { allowed = false } }
 }
 async function opened(f) {
   const ready = await f.stream.next()
@@ -238,4 +242,51 @@ test('TC-DSH-QUESTION-008 已断开的 Peer 或客户端不可收到提问', asy
     abort.abort()
     try { f.gateway.deliverRemoteEvent(f.pending, client); assert.equal(client.deliveries.size, 0) } finally { await f.stream.return() }
   }
+})
+
+
+test('TC-DSH-INTERACTION-001 原生已连接检测识别隔离用户且不跳过通知权限',async()=>{
+  const f=fixture()
+  assert.equal(f.gateway.hasLiveClient(),false)
+  const client=await opened(f)
+  try{
+    assert.equal(f.gateway.hasLiveClient(),true)
+    assert.equal(client.answers,false)
+    const frames=[];client.queue.push=frame=>frames.push(frame)
+    f.revoke()
+    f.gateway.broadcastRemoteEvent({event:'api-session/status',args:[],resources:{session:()=> 'session-other'}})
+    assert.deepEqual(frames,[])
+  }finally{await f.stream.return();f.cleanup()}
+})
+
+test('TC-DSH-INTERACTION-002 非法回答不结算，已过期身份及交互能力撤销均拒绝',async()=>{
+  for(const kind of ['harness-user','harness-admin']){
+    const f=fixture(kind),client=await opened(f)
+    try{
+      let settled=false;f.gateway.settleRemoteEvent=()=>{settled=true}
+      const args={clientId:client.id,eventId:f.pending.id,outcome:{kind:'result',value:[]}}
+      for(const malformed of [{args:{...args,sessionId:'session-other'}},{args:{...args,outcome:{kind:'result',value:()=>{}}}},{args:{...args,outcome:{kind:'rejected',error:{name:'Error',message:1}}}}])assert.equal((await f.gateway.dispatchRpc('$events/result',malformed,undefined,f.peer)).ok,false)
+      f.peer.interactions='observe'
+      assert.equal((await f.gateway.dispatchRpc('$events/result',{args},undefined,f.peer)).ok,false)
+      assert.equal(settled,false)
+    }finally{await f.stream.return();f.cleanup()}
+  }
+})
+
+test('TC-DSH-INTERACTION-003 插件卸载清理流并恢复宿主方法',async()=>{
+  const f=fixture(),client=await opened(f)
+  const prototype=Object.getPrototypeOf(f.gateway)
+  assert.notEqual(f.gateway.dispatchRpc,prototype.dispatchRpc)
+  f.cleanup()
+  assert.equal(f.gateway.remoteEventClients.size,0)
+  assert.equal(f.gateway.dispatchRpc,prototype.dispatchRpc)
+  assert.equal(client.deliveries.size,0)
+  await f.stream.return()
+})
+
+
+test('TC-DSH-INTERACTION-004 不支持的网关接口不能部分安装适配',()=>{
+  let patched=false
+  assert.throws(()=>installInteractions({}, {remoteEventClients:new Map(),pendingRemoteEvents:new Map()},()=>{patched=true}),/unsupported/)
+  assert.equal(patched,false)
 })

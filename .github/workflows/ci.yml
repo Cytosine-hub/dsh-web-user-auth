@@ -23,6 +23,10 @@ jobs:
           node-version: ${{ matrix.node }}
       - name: Run tests
         run: npm test
+      - name: Install isolated native Gateway test dependency
+        run: npm install --prefix "$RUNNER_TEMP/auth-gateway-test" --ignore-scripts --no-audit --no-fund @deepseek-ai/dsh-api-gateway@0.2.1-rc.2
+      - name: Test plugin interactions against unmodified native Gateway
+        run: DSH_GATEWAY_ENTRY="$RUNNER_TEMP/auth-gateway-test/node_modules/@deepseek-ai/dsh-api-gateway/lib/index.js" node --test test/gateway-runtime.test.js
       - name: Build distributable
         run: npm pack --ignore-scripts
       - name: Check distributable contents
