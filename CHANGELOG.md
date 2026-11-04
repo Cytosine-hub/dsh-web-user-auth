@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.3
+
+- Show a loading screen during automatic Token verification. Reveal the login form with a retry option if verification fails or times out.
+
 ## 0.9.2
 
 - Handle native approval and user-question interactions inside the plugin, without rewriting Host files or promoting users to owner.

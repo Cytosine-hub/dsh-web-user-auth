@@ -63,14 +63,16 @@ test('token sessions enforce response deadlines and revoke a changed upstream id
   const second=await sessions.exchange('fixture-two');now=2001;assert.equal(sessions.get(second.record.sid),undefined);assert.equal(second.record.token,'');sessions.dispose()
 })
 
-function browser({storage='localStorage',value='fixture-token',field='',siteOrigin=origin,query='',fail=false}={}){
+function browser({storage='localStorage',value='fixture-token',field='',siteOrigin=origin,query='',fail=false,respond}={}){
   const nodes=[],events={},intervals=[],navigations=[],requests=[],reads=[];let stored=value
-  const node=tag=>({tag,children:[],append(...children){this.children.push(...children)},addEventListener(name,callback){this[name]=callback}})
+  const timers=new Map()
+  const node=tag=>({tag,hidden:false,setAttribute(){},children:[],append(...children){this.children.push(...children)},addEventListener(name,callback){this[name]=callback}})
   const window={location:{href:origin+'/assistant/login'+query,origin,replace:url=>navigations.push(url)},addEventListener:(name,fn)=>events[name]=fn,removeEventListener:name=>delete events[name]}
   for(const area of ['localStorage','sessionStorage'])window[area]={getItem(key){reads.push([area,key]);return area===storage?stored:null}}
-  const sandbox={window,URL,Date,Object,JSON,document:{createElement:tag=>{const result=node(tag);nodes.push(result);return result},body:node('body')},setInterval:fn=>{intervals.push(fn);return intervals.length},clearInterval(){},fetch:async(url,options)=>{requests.push({url,options});const denied=fail||options?.method==='POST'&&!JSON.parse(options.body).token;return {ok:!denied,status:denied?401:200,json:async()=>denied?{error:'Token 已过期'}:url.endsWith('/status')?{role:'user',provider:'token'}:{id:'alice',changed:false}}}}
+  const loading=node('section'),form=node('main');form.hidden=true
+  const sandbox={window,URL,Date,Object,JSON,AbortController,setTimeout(fn,ms){timers.set(fn,ms);return fn},clearTimeout(fn){timers.delete(fn)},document:{createElement:tag=>{const result=node(tag);nodes.push(result);return result},getElementById:id=>id==='dsh-token-loading'?loading:form},setInterval:fn=>{intervals.push(fn);return intervals.length},clearInterval(){},fetch:async(url,options)=>{requests.push({url,options});if(respond)return respond(options);const denied=fail||options?.method==='POST'&&!JSON.parse(options.body).token;return {ok:!denied,status:denied?401:200,json:async()=>denied?{error:'Token 已过期'}:url.endsWith('/status')?{role:'user',provider:'token'}:{id:'alice',changed:false}}}}
   vm.runInNewContext(tokenBrowserScript,sandbox)
-  return {window,nodes,events,intervals,navigations,requests,reads,config:{siteOrigin,storage,storageKey:'auth-key',storageField:field,role:'user'},setStored:value=>stored=value}
+  return {window,nodes,events,intervals,navigations,requests,reads,loading,form,timers,config:{siteOrigin,storage,storageKey:'auth-key',storageField:field,role:'user'},setStored:value=>stored=value}
 }
 const flush=()=>new Promise(resolve=>setImmediate(resolve))
 
@@ -93,6 +95,49 @@ test('browser bridge surfaces expired token errors and watches storage removal w
   watched.setStored('');await watched.events.storage();assert.equal(JSON.parse(watched.requests.at(-1).options.body).token,'');assert.equal(watched.navigations.at(-1),origin+'/assistant/login')
 })
 
+test('slow Token login hides the form until success, timeout or failure',async()=>{
+  let resolveResponse
+  const slow=browser({respond:()=>new Promise(resolve=>{resolveResponse=resolve})})
+  slow.window.__DshTokenAuth.startLogin(slow.config)
+  assert.equal(slow.loading.hidden,false)
+  assert.equal(slow.form.hidden,true)
+  assert.equal(slow.navigations.length,0)
+  resolveResponse({ok:true,json:async()=>({id:'alice'})})
+  await flush()
+  assert.equal(slow.form.hidden,true)
+  assert.equal(slow.navigations[0],origin+'/assistant/')
+
+  let attempts=0
+  const stalled=browser({respond:({signal})=>{
+    if(++attempts===2)return Promise.resolve({ok:true,json:async()=>({id:'alice'})})
+    return new Promise((_,reject)=>{
+      signal.addEventListener('abort',()=>reject(signal.reason),{once:true})
+    })
+  }})
+  stalled.window.__DshTokenAuth.startLogin({...stalled.config,timeoutMs:25000})
+  assert.equal(stalled.form.hidden,true)
+  const [[expire,delay]]=stalled.timers
+  assert.equal(delay,30000)
+  expire()
+  await flush()
+  assert.equal(stalled.loading.hidden,true)
+  assert.equal(stalled.form.hidden,false)
+  assert.equal(stalled.navigations.length,0)
+  assert.ok(stalled.nodes.some(node=>node.textContent?.includes('超时')))
+  const retry=stalled.nodes.find(node=>node.tag==='button').click()
+  assert.equal(stalled.form.hidden,true)
+  await retry
+  assert.equal(stalled.navigations[0],origin+'/assistant/')
+
+  for(const input of [{fail:true},{value:''}]){
+    const failed=browser(input)
+    failed.window.__DshTokenAuth.startLogin(failed.config)
+    await flush()
+    assert.equal(failed.loading.hidden,true)
+    assert.equal(failed.form.hidden,false)
+  }
+})
+
 test('token mode integrates same-origin exchange, signed opaque sessions, expiry and preserved admin access',async()=>{
   const {apply}=await import('../lib/plugin.js')
   let expiresAt=Date.now()+100000,expired=false,headersSeen,bodyIdentity='alice',bodyRoles=['member']
@@ -108,7 +153,12 @@ test('token mode integrates same-origin exchange, signed opaque sessions, expiry
   const get=async(route,cookie,url=route)=>{const result=res();await routes.get(route)({method:'GET',url,headers:{host,cookie}},result);return result}
   try{
     await apply(ctx,{enabled:true,provider:'token',token:{siteOrigin:site,userInfoUrl:'/me',storage:'sessionStorage',storageKey:'auth',storageField:'access.token',roleField:'roles',adminRoles:['admin'],userField:'data',idField:'uid',nameField:'display',successField:'code',successValue:0,expiredField:'expired',expiresAtField:'expiresAt',expiresAtFormat:'milliseconds'}})
-    assert.match((await get('/login')).body,/auth-token-client.js/)
+    const loginPage=(await get('/login')).body
+    assert.match(loginPage,/<section id="dsh-token-loading" role="status">/)
+    assert.match(loginPage,/<main id="dsh-login-form" hidden>/)
+    const adminPage=(await get('/login',undefined,'/login?admin=1')).body
+    assert.match(adminPage,/<main id="dsh-login-form">/)
+    assert.match(adminPage,/<section id="dsh-token-loading" role="status" hidden>/)
     assert.match((await get('/login')).body,/sessionStorage/)
     assert.equal((await post('/api/auth/token',{token:'fixture-user-token'},undefined,'https://foreign.example.test')).status,403)
     assert.equal((await post('/api/auth/token',{token:'fixture-user-token'},undefined,site,'foreign.example.test')).status,403)
