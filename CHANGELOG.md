@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Accept Fetch request cookies on the DSH 0.2.2 Web index and clear invalid Token cookies on redirects.
+- Scope the DSH 0.2.2 task catalog and list to owned sessions before applying pagination.
+
 ## 0.9.3
 
 - Show a loading screen during automatic Token verification. Reveal the login form with a retry option if verification fails or times out.

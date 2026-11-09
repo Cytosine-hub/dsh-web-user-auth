@@ -169,9 +169,13 @@ test('token mode integrates same-origin exchange, signed opaque sessions, expiry
     const state=JSON.parse((await get('/api/auth/status',cookie)).body);assert.equal(state.role,'user');assert.equal(state.tokenClient.storage,'sessionStorage');assert.equal(state.canChangePassword,false)
     assert.equal((await get('/api/auth/admin',cookie)).status,403)
     const peer=ctx.connection.admit({headers:{host,cookie}}).peer;assert.equal(peer.principal.userId,'alice')
+    const fetchIndex = value => new Request(site + '/', { headers: { host, cookie: value } })
+    const fetchResponse = () => ({ writeHead(status, headers) { this.status = status; this.headers = headers }, end() {} })
+    assert.equal(ctx.connection.authorizeIndex(fetchIndex(cookie), fetchResponse()), true)
     const password=fs.readFileSync(path.join(home,'web-admin/initial-password.txt'),'utf8').trim()
     const administrator=await post('/login',new URLSearchParams({username:'admin',password}).toString());assert.equal(administrator.status,303)
     const adminCookie=administrator.headers['set-cookie'][0].split(';')[0]
+    assert.equal(ctx.connection.authorizeIndex(fetchIndex(adminCookie), fetchResponse()), true)
     assert.equal(JSON.parse((await get('/api/auth/status',adminCookie)).body).role,'admin')
     assert.equal(JSON.parse((await post('/api/auth/token',{token:'fixture-user-token'},adminCookie)).body).administrator,true)
     bodyRoles=['admin']
@@ -195,6 +199,10 @@ test('token mode integrates same-origin exchange, signed opaque sessions, expiry
     assert.equal(peer.signal.aborted,true);assert.equal(ctx.connection.admit({headers:{host,cookie}}).rejection,401)
     const invalidState=await get('/api/auth/status',cookie);assert.equal(JSON.parse(invalidState.body).role,'anonymous');assert.match(invalidState.headers['set-cookie'][0],/Max-Age=0/)
     const deniedRoot=res();assert.equal(ctx.connection.authorizeIndex({url:'/',headers:{host,cookie}},deniedRoot),false);assert.match(deniedRoot.headers['set-cookie'][0],/Max-Age=0/)
+    const deniedFetchIndex = fetchResponse()
+    assert.equal(ctx.connection.authorizeIndex(fetchIndex(cookie), deniedFetchIndex), false)
+    assert.equal(deniedFetchIndex.status, 303)
+    assert.match(String(deniedFetchIndex.headers['set-cookie']), /Max-Age=0/)
     assert.equal(JSON.parse((await get('/api/auth/status',adminCookie)).body).role,'admin')
   }finally{
     for(const dispose of disposers.reverse())dispose()

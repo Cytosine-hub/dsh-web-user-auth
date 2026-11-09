@@ -7,7 +7,7 @@ import { apply } from '../lib/plugin.js'
 import { ADMIN_USER_ID } from '../lib/identity.js'
 import { userDirectoryName } from '../lib/paths.js'
 
-async function fixture(t, { deferred = false } = {}) {
+async function fixture(t, { deferred = false, hostWideSchedule = false } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-permissions-'))
   const previous = process.env.DSH_HOME
   process.env.DSH_HOME = home
@@ -43,7 +43,14 @@ async function fixture(t, { deferred = false } = {}) {
     async list(scope, target) { return fs.readdirSync(nativePath(scope, target)) },
     async *changes(scope, target) { yield { path: fs.realpathSync(nativePath(scope, target)) } },
   }
-  const schedule = { async catalog() { return tasks } }
+  const schedule = hostWideSchedule ? {
+    async entries() { return tasks },
+    async catalog() { return this.entries() },
+    async remoteList({ limit = 10, offset = 0 } = {}) {
+      const items = await this.entries()
+      return { items: items.slice(offset, offset + limit), total: items.length }
+    },
+  } : { async catalog() { return tasks } }
   const policies = new Map()
   const ctx = {
     invocation: { peer: { principal: { kind: 'harness-user', userId: 'alice' } } },
@@ -155,4 +162,25 @@ test('TC-AUTH-PERM-005 an expired administrator cannot fall back to unscoped ser
   f.ctx.invocation.peer.principal = { kind: 'harness-admin', userId: 'expired-token-admin' }
   await assert.rejects(f.schedule.catalog(), /authenticated user is unavailable/)
   await assert.rejects(f.files.read(f.scope, path.join(f.directories.bob, 'secret.txt')), /authenticated user is unavailable/)
+})
+
+test('TC-AUTH-PERM-006 Host-wide task lists filter ownership before pagination and counts', async t => {
+  const f = await fixture(t, { hostWideSchedule: true, deferred: true })
+  const principal = f.ctx.invocation.peer.principal
+  const binding = f.policies.get('harness-user').bindings(principal)
+    .find(entry => entry.resource.kind === 'global')
+  assert.ok(binding.role.actions.includes('schedule/list'))
+  const decision = () => binding.condition({ action: 'schedule/list' }).kind
+  assert.equal(decision(), 'deny')
+  f.optional.get('schedule').load()
+  assert.equal(decision(), 'allow')
+  assert.deepEqual(await f.schedule.remoteList({ limit: 1, offset: 1 }), {
+    items: [{ id: 'task-alice-nested', sessionId: 'alice-nested' }], total: 2,
+  })
+  f.ctx.invocation.peer.principal = { kind: 'harness-admin', userId: ADMIN_USER_ID }
+  assert.deepEqual((await f.schedule.remoteList()).items.map(task => task.sessionId), ['admin-root'])
+  f.ctx.invocation.peer.principal = { kind: 'owner' }
+  assert.equal((await f.schedule.remoteList()).total, 4)
+  f.optional.get('schedule').dispose()
+  assert.equal(decision(), 'deny')
 })
